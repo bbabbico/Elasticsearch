@@ -1,0 +1,14 @@
+{
+  "analysis": {
+    "analyzer": {
+      "nori": {
+        "type": "custom",
+        "tokenizer": "nori_tokenizer",
+        "filter": ["nori_readingform", "lowercase"]
+      }
+    }
+  },
+  "index": {
+    "max_result_window": 1000000
+  }
+}

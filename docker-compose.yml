@@ -1,0 +1,221 @@
+# ============================================================
+# Elastic 프로젝트 인프라 Docker Compose
+# 포함 서비스: MySQL, Redis, Elasticsearch, Kibana,
+#             Zookeeper, Kafka, Kafka UI
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # MySQL 8.0 – 메인 RDBMS
+  # ----------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: elastic-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root1234
+      MYSQL_DATABASE: elastic_db
+      MYSQL_USER: elastic
+      MYSQL_PASSWORD: elastic123
+      TZ: Asia/Seoul
+    # utf8mb4 캐릭터셋 및 정렬 설정
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot1234"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # Redis 7 – 캐시 / 세션 저장소
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: elastic-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------
+  # Elasticsearch 8.15.0 – 검색 엔진 (nori 플러그인 포함)
+  # ----------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elastic-es
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      # 단일 노드 모드
+      - discovery.type=single-node
+      # 보안 비활성화 (개발 환경)
+      - xpack.security.enabled=false
+      # JVM 힙 메모리 설정
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # 클러스터 이름
+      - cluster.name=elastic-cluster
+    # nori 한국어 분석기 플러그인 설치 후 ES 시작
+    entrypoint: >
+      bash -c "
+        if ! bin/elasticsearch-plugin list | grep -q analysis-nori; then
+          bin/elasticsearch-plugin install --batch analysis-nori;
+        fi;
+        /usr/local/bin/docker-entrypoint.sh elasticsearch
+      "
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ----------------------------------------------------------
+  # Kibana 8.15.0 – Elasticsearch 시각화 대시보드
+  # ----------------------------------------------------------
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: elastic-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ----------------------------------------------------------
+  # Zookeeper – Kafka 코디네이션 서비스
+  # ----------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    container_name: elastic-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "ruok,stat,conf"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD", "cub", "zk-ready", "localhost:2181", "10"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ----------------------------------------------------------
+  # Kafka – 메시지 브로커
+  # ----------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: elastic-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # 내부(Docker 네트워크) / 외부(호스트) 리스너 분리
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # Kafka UI – Kafka 모니터링 웹 UI (호스트 포트 8088)
+  # ----------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: elastic-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: elastic-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - elastic-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+# ============================================================
+# 네트워크 설정
+# ============================================================
+networks:
+  elastic-network:
+    driver: bridge
+
+# ============================================================
+# 볼륨 설정 – 데이터 영속화
+# ============================================================
+volumes:
+  mysql-data:        # MySQL 데이터
+  redis-data:        # Redis 스냅샷
+  es-data:           # Elasticsearch 인덱스 데이터
+  zookeeper-data:    # Zookeeper 상태 데이터
+  zookeeper-log:     # Zookeeper 트랜잭션 로그
+  kafka-data:        # Kafka 메시지 데이터

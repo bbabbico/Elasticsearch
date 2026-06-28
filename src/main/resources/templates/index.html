@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elastic Search vs RDB Benchmark</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --success-hover: #059669;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background-color: var(--card-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+        }
+
+        .brand {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-align: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-title {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 10px 16px;
+            background-color: white;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+
+        .btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background-color: #eff6ff;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            text-align: center;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            border-color: var(--primary-hover);
+            color: white;
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            color: white;
+            border-color: var(--success);
+            text-align: center;
+        }
+
+        .btn-success:hover {
+            background-color: var(--success-hover);
+            border-color: var(--success-hover);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .header {
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: var(--text-muted);
+        }
+
+        .chart-container {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            flex-shrink: 0;
+            height: 400px;
+            position: relative;
+            margin-bottom: 24px;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            display: none;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border-left-color: var(--primary);
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .log-area {
+            margin-top: 24px;
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: monospace;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+        .log-area p {
+            margin-bottom: 4px;
+        }
+
+        /* Raw Data Table */
+        .data-table-wrapper {
+            margin-top: 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            display: none;
+            flex-shrink: 0;
+        }
+        .data-table-wrapper.active {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: right;
+            border-bottom: 1px solid var(--border-color);
+        }
+        th:first-child, td:first-child {
+            text-align: left;
+        }
+        th {
+            background-color: #f1f5f9;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="brand">🚀 Elastic Benchmark</div>
+
+        <div>
+            <div class="section-title">데이터 관리 (Admin)</div>
+            <button id="btn-init-data" class="btn btn-success" onclick="initData()">
+                전체 초기화 (20만 건 생성)
+            </button>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
+                * MySQL, Redis, ES에 20만 건의 더미 데이터를 주입합니다. 약 1~2분 소요.
+            </p>
+        </div>
+
+        <div>
+            <div class="section-title">벤치마크 일괄 실행</div>
+            <button class="btn btn-primary" onclick="runBenchmark('all')">
+                ▶ 모든 시나리오 실행
+            </button>
+        </div>
+
+        <div>
+            <div class="section-title">개별 시나리오 테스트</div>
+            <button class="btn" onclick="runBenchmark(1)">1. Cold Start (최초 조회)</button>
+            <button class="btn" onclick="runBenchmark(2)">2. Warm Cache (반복 조회)</button>
+            <button class="btn" onclick="runBenchmark(3)">3. Keyword Search (키워드 검색)</button>
+            <button class="btn" onclick="runBenchmark(4)">4. Cache Churn (수정 직후 조회)</button>
+            <button class="btn" onclick="runBenchmark(5)">5. Random Access (무작위 페이징)</button>
+            <button class="btn" onclick="runBenchmark(6)">6. Complex Filter (복합 조건 필터)</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="header">
+            <h1 id="view-title">성능 벤치마크 결과</h1>
+            <p id="view-subtitle">RDB, Redis 캐싱 전략(A/B/C), 그리고 Elasticsearch의 응답 속도(ms) 비교</p>
+        </div>
+
+        <div class="chart-container">
+            <!-- Loading Overlay -->
+            <div id="loading" class="loading-overlay">
+                <div class="spinner"></div>
+                <div id="loading-text" style="font-weight: 500; color: var(--text-main);">요청 처리 중...</div>
+            </div>
+
+            <!-- Chart Canvas -->
+            <canvas id="benchmarkChart"></canvas>
+        </div>
+
+        <!-- Raw Data Table -->
+        <div class="data-table-wrapper" id="data-table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>시나리오</th>
+                        <th>RDB (MySQL)</th>
+                        <th>Redis A (Look-aside)</th>
+                        <th>Redis B (Entity Cache)</th>
+                        <th>Redis C (Zero-RDB)</th>
+                        <th>Elasticsearch</th>
+                    </tr>
+                </thead>
+                <tbody id="data-tbody">
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Log Output -->
+        <div class="log-area" id="log-output">
+            <p style="color: #94a3b8;">> 시스템 준비 완료...</p>
+        </div>
+    </div>
+
+    <script>
+        let myChart = null;
+
+        function addLog(msg, type = 'info') {
+            const logOutput = document.getElementById('log-output');
+            const p = document.createElement('p');
+            const time = new Date().toLocaleTimeString();
+            let color = '#e2e8f0';
+            if (type === 'error') color = '#ef4444';
+            if (type === 'success') color = '#10b981';
+            
+            p.style.color = color;
+            p.innerHTML = `[${time}] > ${msg}`;
+            logOutput.appendChild(p);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function showLoading(text) {
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('loading-text').innerText = text;
+            disableButtons(true);
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.remove('active');
+            disableButtons(false);
+        }
+
+        function disableButtons(disabled) {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => btn.disabled = disabled);
+        }
+
+        // 20만 건 데이터 초기화
+        async function initData() {
+            if (!confirm('기존 데이터를 삭제하고 20만 건의 더미 데이터를 새로 생성하시겠습니까? 수 분이 소요될 수 있습니다.')) return;
+            
+            showLoading('20만 건 데이터 생성 및 동기화 중... (1~2분 대기)');
+            addLog('데이터 전체 초기화 요청 시작...', 'info');
+
+            try {
+                // 20만건은 너무 오래 걸릴 수 있어 브라우저 타임아웃 방지를 위해 비동기 요청일 수 있으나
+                // 현재 구조는 동기 처리이므로 기다립니다.
+                const response = await fetch('/api/admin/init/all?members=100&articles=200000', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.text();
+                    addLog(result, 'success');
+                    alert('데이터 적재가 완료되었습니다!');
+                } else {
+                    addLog('데이터 생성 실패 (Status: ' + response.status + ')', 'error');
+                }
+            } catch (error) {
+                addLog('네트워크 오류: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 벤치마크 실행 (개별 또는 전체)
+        async function runBenchmark(type) {
+            let url = '/api/benchmark/all';
+            let title = '전체 시나리오 일괄 실행 결과';
+            
+            if (type !== 'all') {
+                url = `/api/benchmark/scenario/${type}`;
+                title = `시나리오 ${type} 실행 결과`;
+            }
+
+            showLoading('벤치마크 테스트 진행 중...');
+            addLog(`${title} 요청...`, 'info');
+            document.getElementById('view-title').innerText = title;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                addLog('벤치마크 완료 및 응답 수신 성공', 'success');
+                
+                // 단일 결과인 경우 배열로 감싸기
+                const results = Array.isArray(data) ? data : [data];
+                
+                renderChart(results);
+                renderTable(results);
+
+            } catch (error) {
+                addLog('벤치마크 실패: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Chart.js 렌더링
+        function renderChart(data) {
+            const ctx = document.getElementById('benchmarkChart').getContext('2d');
+            
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            // API가 반환하는 플랫 배열을 시나리오별/전략별로 그룹화합니다.
+            const scenarios = [...new Set(data.map(item => item.scenario))];
+            
+            const getStrategyData = (strategyName) => {
+                return scenarios.map(scenario => {
+                    const found = data.find(item => item.scenario === scenario && item.strategy === strategyName);
+                    return found ? found.avgMs : 0;
+                });
+            };
+
+            const rdbData = getStrategyData("RDB");
+            const redisAData = getStrategyData("Redis_A");
+            const redisBData = getStrategyData("Redis_B");
+            const redisCData = getStrategyData("Redis_C");
+            const esData = getStrategyData("Elasticsearch");
+
+            myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: scenarios,
+                    datasets: [
+                        {
+                            label: 'RDB (MySQL)',
+                            data: rdbData,
+                            backgroundColor: '#ef4444', // Red
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Redis A (Look-aside)',
+                            data: redisAData,
+                            backgroundColor: '#f59e0b', // Amber
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Redis B (Entity Cache)',
+                            data: redisBData,
+                            backgroundColor: '#10b981', // Emerald
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Redis C (Zero-RDB)',
+                            data: redisCData,
+                            backgroundColor: '#8b5cf6', // Violet
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Elasticsearch',
+                            data: esData,
+                            backgroundColor: '#3b82f6', // Blue
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '응답 시간 (ms)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 하단 데이터 테이블 렌더링
+        function renderTable(data) {
+            const wrapper = document.getElementById('data-table-wrapper');
+            const tbody = document.getElementById('data-tbody');
+            tbody.innerHTML = '';
+
+            const scenarios = [...new Set(data.map(item => item.scenario))];
+            
+            scenarios.forEach(scenario => {
+                const getAvg = (strategyName) => {
+                    const found = data.find(item => item.scenario === scenario && item.strategy === strategyName);
+                    return found ? found.avgMs : '-';
+                };
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${scenario}</strong></td>
+                    <td style="color: #ef4444">${getAvg("RDB")} ms</td>
+                    <td style="color: #f59e0b">${getAvg("Redis_A")} ms</td>
+                    <td style="color: #10b981">${getAvg("Redis_B")} ms</td>
+                    <td style="color: #8b5cf6">${getAvg("Redis_C")} ms</td>
+                    <td style="color: #3b82f6">${getAvg("Elasticsearch")} ms</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            wrapper.classList.add('active');
+        }
+    </script>
+</body>
+</html>
