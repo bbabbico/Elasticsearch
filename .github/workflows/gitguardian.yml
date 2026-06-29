@@ -1,0 +1,27 @@
+name: GitGuardian Scan
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  scanning:
+    name: GitGuardian Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GitGuardian이 커밋 히스토리를 전부 스캔할 수 있도록 0으로 설정합니다.
+
+      - name: GitGuardian Scan
+        uses: GitGuardian/ggshield-action@v1.33.0
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # GitHub 저장소의 Secrets에 GITGUARDIAN_API_KEY를 등록해야 합니다.
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
