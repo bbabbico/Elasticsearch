@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
  * <p>
  * Elasticsearch에 인덱싱되는 게시글 문서 클래스.
  * nori 분석기를 사용하여 한국어 형태소 분석 기반 검색을 지원한다.
+ * qwe
  * </p>
  */
 @Document(indexName = "articles")
